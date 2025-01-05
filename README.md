@@ -21,3 +21,11 @@ maximum_batching_window_in_seconds を 0 にすることで正しく動作する
 ## SQS → StepFunctions（同期）
 
 https://github.com/shikazuki/sqs-dlq-validation/commit/be505a6879fbe17068d6fb81752227633277aa11
+
+## Usage
+
+```shell
+$ terraform init
+$ terraform apply
+$ aws sqs send-message --queue-url <QUEUE_URL> --message-body "Test Message"
+```
