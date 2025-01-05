@@ -205,16 +205,16 @@ resource "aws_iam_role_policy" "state_machine_policy" {
 
 # Create a Log group for the state machine
 resource "aws_cloudwatch_log_group" "state_machine_logger" {
-  name              = "/aws/states/${local.prefix}-sfn-state-machine"
+  name = "/aws/states/${local.prefix}-sfn-state-machine"
 }
 
 resource "aws_sfn_state_machine" "sfn_state_machine" {
   name     = "${local.prefix}-sfn-state-machine"
-  type = "EXPRESS"
+  type     = "EXPRESS"
   role_arn = aws_iam_role.iam_for_state_machine.arn
   definition = templatefile("${path.root}/statemachine/statemachine.asl.json", {
     ProcessingLambda = aws_lambda_function.consumer.arn
-  }
+    }
   )
   logging_configuration {
     log_destination        = "${aws_cloudwatch_log_group.state_machine_logger.arn}:*"
