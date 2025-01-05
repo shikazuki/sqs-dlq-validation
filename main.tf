@@ -208,7 +208,7 @@ resource "aws_pipes_pipe" "main" {
   source_parameters {
     sqs_queue_parameters {
       batch_size                         = 1
-      maximum_batching_window_in_seconds = 2
+      maximum_batching_window_in_seconds = 0
     }
   }
   target_parameters {
