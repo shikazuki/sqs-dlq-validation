@@ -133,6 +133,96 @@ resource "aws_iam_role_policy_attachment" "lambda_logs" {
   policy_arn = aws_iam_policy.lambda_logging.arn
 }
 
+### StepFunctions ###
+
+data "aws_iam_policy_document" "state_machine_assume_role" {
+  statement {
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["states.amazonaws.com"]
+    }
+
+    actions = [
+      "sts:AssumeRole",
+    ]
+  }
+}
+
+resource "aws_iam_role" "iam_for_state_machine" {
+  name               = "${local.prefix}-state-machine"
+  assume_role_policy = data.aws_iam_policy_document.state_machine_assume_role.json
+}
+
+data "aws_iam_policy_document" "state_machine_role_policy" {
+  statement {
+    effect = "Allow"
+
+    actions = [
+      "logs:CreateLogStream",
+      "logs:PutLogEvents",
+      "logs:DescribeLogGroups"
+    ]
+
+    resources = ["${aws_cloudwatch_log_group.state_machine_logger.arn}:*"]
+  }
+
+  statement {
+    effect = "Allow"
+    actions = [
+      "cloudwatch:PutMetricData",
+      "logs:CreateLogDelivery",
+      "logs:GetLogDelivery",
+      "logs:UpdateLogDelivery",
+      "logs:DeleteLogDelivery",
+      "logs:ListLogDeliveries",
+      "logs:PutResourcePolicy",
+      "logs:DescribeResourcePolicies",
+      "logs:DescribeLogGroups"
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    effect = "Allow"
+
+    actions = [
+      "lambda:InvokeFunction"
+    ]
+
+    resources = [aws_lambda_function.consumer.arn]
+  }
+
+}
+
+# Create an IAM policy for the Step Functions state machine
+resource "aws_iam_role_policy" "state_machine_policy" {
+  name   = "${local.prefix}-state-machine-policy"
+  role   = aws_iam_role.iam_for_state_machine.id
+  policy = data.aws_iam_policy_document.state_machine_role_policy.json
+}
+
+# Create a Log group for the state machine
+resource "aws_cloudwatch_log_group" "state_machine_logger" {
+  name              = "/aws/states/${local.prefix}-sfn-state-machine"
+}
+
+resource "aws_sfn_state_machine" "sfn_state_machine" {
+  name     = "${local.prefix}-sfn-state-machine"
+  type = "EXPRESS"
+  role_arn = aws_iam_role.iam_for_state_machine.arn
+  definition = templatefile("${path.root}/statemachine/statemachine.asl.json", {
+    ProcessingLambda = aws_lambda_function.consumer.arn
+  }
+  )
+  logging_configuration {
+    log_destination        = "${aws_cloudwatch_log_group.state_machine_logger.arn}:*"
+    include_execution_data = true
+    level                  = "ALL"
+  }
+}
+
 ### EventBridge Pipes ###
 
 data "aws_iam_policy_document" "pipe_assume_role" {
@@ -182,11 +272,11 @@ resource "aws_iam_role_policy" "target" {
       {
         Effect = "Allow"
         Action = [
-          "lambda:InvokeAsync",
-          "lambda:InvokeFunction"
+          "states:StartSyncExecution",
+          "states:StartExecution"
         ],
         Resource = [
-          aws_lambda_function.consumer.arn,
+          aws_sfn_state_machine.sfn_state_machine.arn,
         ]
       },
     ]
@@ -203,16 +293,16 @@ resource "aws_pipes_pipe" "main" {
   name       = "${local.prefix}-pipe"
   role_arn   = aws_iam_role.iam_for_pipe.arn
   source     = aws_sqs_queue.main.arn
-  target     = aws_lambda_function.consumer.arn
+  target     = aws_sfn_state_machine.sfn_state_machine.arn
 
   source_parameters {
     sqs_queue_parameters {
-      batch_size                         = 1
-      maximum_batching_window_in_seconds = 2
+      batch_size                         = 10
+      maximum_batching_window_in_seconds = 0
     }
   }
   target_parameters {
-    lambda_function_parameters {
+    step_function_state_machine_parameters {
       invocation_type = "REQUEST_RESPONSE"
     }
   }
@@ -225,4 +315,3 @@ resource "aws_pipes_pipe" "main" {
     }
   }
 }
-
